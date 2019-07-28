@@ -174,26 +174,35 @@ public class RNPushNotificationHelper {
                 return;
             }
 
-            if (bundle.getString("message") == null) {
-                // this happens when a 'data' notification is received - we do not synthesize a local notification in this case
-                Log.d(LOG_TAG, "Cannot send to notification centre because there is no 'message' field in: " + bundle);
-                return;
+            String msg = bundle.getString("message");
+            if (msg == null) {
+                msg = bundle.getString("pinpoint.notification.body");
+                if (msg == null) {
+                    // this happens when a 'data' notification is received - we do not synthesize a local notification in this case
+                    Log.d(LOG_TAG, "Cannot send to notification centre because there is no 'message' field in: " + bundle);
+                    return;
+                }
             }
 
             String notificationIdString = bundle.getString("id");
             if (notificationIdString == null) {
-                Log.e(LOG_TAG, "No notification ID specified for the notification");
-                return;
+                notificationIdString = bundle.getString("pinpoint.campaign.campaign_id");
+                if (notificationIdString == null) {
+                    Log.e(LOG_TAG, "No notification ID specified for the notification");
+                    return;
+                }
             }
 
             Resources res = context.getResources();
             String packageName = context.getPackageName();
 
             String title = bundle.getString("title");
-            String message = bundle.getString("message");
             if (title == null) {
-                ApplicationInfo appInfo = context.getApplicationInfo();
-                title = context.getPackageManager().getApplicationLabel(appInfo).toString();
+                title = bundle.getString("pinpoint.notification.title");
+                if (title == null) {
+                    ApplicationInfo appInfo = context.getApplicationInfo();
+                    title = context.getPackageManager().getApplicationLabel(appInfo).toString();
+                }
             }
 
             NotificationCompat.Builder notification = new NotificationCompat.Builder(context, NOTIFICATION_CHANNEL_ID)
@@ -208,7 +217,7 @@ public class RNPushNotificationHelper {
                 notification.setGroup(group);
             }
 
-            notification.setContentText(message);
+            notification.setContentText(msg);
 
             String largeIcon = bundle.getString("largeIcon");
 
@@ -281,28 +290,45 @@ public class RNPushNotificationHelper {
             bundle.putBoolean("userInteraction", true);
             intent.putExtra("notification", bundle);
 
+            Uri soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
             if (!bundle.containsKey("playSound") || bundle.getBoolean("playSound")) {
-                Uri soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
                 String soundName = bundle.getString("soundName");
-                if (soundName != null) {
-                    if (!"default".equalsIgnoreCase(soundName)) {
+                if (soundName == null) {
+                    soundName = bundle.getString("pinpoint.notification.sound");
+                    if (soundName != null) {
+                        if (!"default".equalsIgnoreCase(soundName)) {
 
-                        // sound name can be full filename, or just the resource name.
-                        // So the strings 'my_sound.mp3' AND 'my_sound' are accepted
-                        // The reason is to make the iOS and android javascript interfaces compatible
+                            // sound name can be full filename, or just the resource name.
+                            // So the strings 'my_sound.mp3' AND 'my_sound' are accepted
+                            // The reason is to make the iOS and android javascript interfaces compatible
 
-                        int resId;
-                        if (context.getResources().getIdentifier(soundName, "raw", context.getPackageName()) != 0) {
-                            resId = context.getResources().getIdentifier(soundName, "raw", context.getPackageName());
-                        } else {
-                            soundName = soundName.substring(0, soundName.lastIndexOf('.'));
-                            resId = context.getResources().getIdentifier(soundName, "raw", context.getPackageName());
+                            int resId;
+                            if (context.getResources().getIdentifier(soundName, "raw", context.getPackageName()) != 0) {
+                                resId = context.getResources().getIdentifier(soundName, "raw", context.getPackageName());
+                            } else {
+                                soundName = soundName.substring(0, soundName.lastIndexOf('.'));
+                                resId = context.getResources().getIdentifier(soundName, "raw", context.getPackageName());
+                            }
+
+                            soundUri = Uri.parse("android.resource://" + context.getPackageName() + "/" + resId);
                         }
-
-                        soundUri = Uri.parse("android.resource://" + context.getPackageName() + "/" + resId);
                     }
                 }
                 notification.setSound(soundUri);
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                notification.setSound(null);
+                AudioAttributes audioAttributes = new AudioAttributes.Builder()
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                    .build();
+
+                int importance = NotificationManager.IMPORTANCE_HIGH;
+                NotificationChannel notificationChannel = new NotificationChannel(NOTIFICATION_CHANNEL_ID, NOTIFICATION_CHANNEL_NAME, importance);
+                notificationChannel.enableLights(true);
+                notificationChannel.enableVibration(true);
+                notificationChannel.setSound(soundUri, audioAttributes);
+                notificationManager.createNotificationChannel(notificationChannel);
             }
 
             if (bundle.containsKey("ongoing") || bundle.getBoolean("ongoing")) {
